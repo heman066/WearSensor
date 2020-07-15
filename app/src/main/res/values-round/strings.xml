@@ -1,0 +1,7 @@
+<resources>
+    <string name="hello_world">Hello Round World!</string>
+
+    <string name="start">START</string>
+    <string name="stop">STOP</string>
+    <string name="upload">UPLOAD</string>
+</resources>
