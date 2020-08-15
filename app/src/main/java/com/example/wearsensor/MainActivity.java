@@ -1,7 +1,10 @@
 package com.example.wearsensor;
 
 import android.Manifest;
+import android.content.BroadcastReceiver;
 import android.content.Context;
+import android.content.Intent;
+import android.content.IntentFilter;
 import android.content.pm.PackageManager;
 import android.hardware.Sensor;
 import android.hardware.SensorEvent;
@@ -22,6 +25,7 @@ import android.widget.Toast;
 
 import androidx.annotation.NonNull;
 import androidx.core.app.ActivityCompat;
+import androidx.localbroadcastmanager.content.LocalBroadcastManager;
 
 import com.google.android.gms.tasks.Tasks;
 import com.google.android.gms.wearable.Asset;
@@ -43,7 +47,7 @@ import java.util.Date;
 import java.util.Locale;
 import java.util.concurrent.ExecutionException;
 
-public class MainActivity extends WearableActivity implements SensorEventListener, DataClient.OnDataChangedListener {
+public class MainActivity extends WearableActivity implements SensorEventListener {
 
     private ImageButton btnStart, btnStop, btnWifi, btnUpload;
     private FileWriter fileWriterAcc, fileWriterGyro;
@@ -62,6 +66,7 @@ public class MainActivity extends WearableActivity implements SensorEventListene
 
     private SensorManager senSensorManager;
     private Sensor senAccelerometer, senGyroscope;
+    private boolean connectedToMobile;
 
     public static WifiManager wifiManager;
 
@@ -88,6 +93,20 @@ public class MainActivity extends WearableActivity implements SensorEventListene
         onClickListner();
     }
 
+    @Override
+    protected void onResume() {
+        super.onResume();
+        if (wifiManager.isWifiEnabled()){
+            WifiInfo info = wifiManager.getConnectionInfo();
+            String checkSSID = info.getSSID();
+            if (checkSSID.equals(hostSSID)){
+                btnWifi.setImageDrawable(getResources().getDrawable(R.drawable.ic_baseline_wifi_off_24));
+            } else {
+                btnWifi.setImageDrawable(getResources().getDrawable(R.drawable.ic_wifi_black_24dp));
+            }
+        }
+    }
+
     private void initialize() {
         btnStart = findViewById(R.id.btn_start);
         btnStop = findViewById(R.id.btn_stop);
@@ -95,12 +114,23 @@ public class MainActivity extends WearableActivity implements SensorEventListene
         btnWifi = findViewById(R.id.btn_wifi);
 
         wifiManager = (WifiManager) getApplicationContext().getSystemService(Context.WIFI_SERVICE);
+        connectedToMobile = false;
+        hostSSID = "dummy";
 
         currentDate = new SimpleDateFormat("MMddyyyy", Locale.getDefault()).format(new Date());
         senSensorManager = (SensorManager) getSystemService(Context.SENSOR_SERVICE);
         senAccelerometer = senSensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER);
         senGyroscope = senSensorManager.getDefaultSensor(Sensor.TYPE_GYROSCOPE);
+        LocalBroadcastManager.getInstance(this).registerReceiver(mMessageReciever,
+                new IntentFilter("custom-event-name"));
     }
+
+    private BroadcastReceiver mMessageReciever = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            getInfoFromString(intent.getStringExtra("info"));
+        }
+    };
 
     private void onClickListner() {
         btnStart.setOnClickListener(new View.OnClickListener() {
@@ -118,6 +148,7 @@ public class MainActivity extends WearableActivity implements SensorEventListene
 
                 senSensorManager.registerListener(MainActivity.this,senAccelerometer,SensorManager.SENSOR_DELAY_GAME);
                 senSensorManager.registerListener(MainActivity.this,senGyroscope,SensorManager.SENSOR_DELAY_GAME);
+                btnUpload.setVisibility(View.GONE);
             }
         });
 
@@ -127,40 +158,78 @@ public class MainActivity extends WearableActivity implements SensorEventListene
                 Toast.makeText(MainActivity.this,"Data Recording Stopped",Toast.LENGTH_LONG).show();
                 senSensorManager.unregisterListener(MainActivity.this,senAccelerometer);
                 senSensorManager.unregisterListener(MainActivity.this,senGyroscope);
+                /*new Thread(new Runnable() {
+                    @Override
+                    public void run() {
+                        try {
+                            for (int i = 1 ; i <= 200 ; i++){
+                                fileWriterAcc.write("dummy,dummy,dummy,dummy\n");
+                                fileWriterAcc.flush();
+                                fileWriterGyro.write("dummy,dummy,dummy,dummy\n");
+                                fileWriterGyro.flush();
+                            }
+                        } catch (IOException e) {
+                            e.printStackTrace();
+                        }
+                    }
+                }).start();*/
+                btnUpload.setVisibility(View.VISIBLE);
             }
         });
 
         btnWifi.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                connectToHotspot();
+                if (wifiManager.isWifiEnabled()){
+                    WifiInfo info = wifiManager.getConnectionInfo();
+                    String checkSSID = info.getSSID();
+                    if (!checkSSID.equals(hostSSID)){
+                        if (wifiManager.pingSupplicant()){
+                            wifiManager.disconnect();
+                            wifiManager.disableNetwork(info.getNetworkId());
+                            connectToHotspot();
+                        }
+                    } else {
+                        Toast.makeText(MainActivity.this,"Already Connected to Host",Toast.LENGTH_SHORT).show();
+                    }
+                } else{
+                    wifiManager.setWifiEnabled(true);
+                    connectToHotspot();
+                }
             }
         });
 
         btnUpload.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                new Thread(new ClientTask(hostIp,8988)).start();
+                new Thread(new ClientTask(hostIp,8988,MainActivity.this)).start();
             }
         });
     }
 
     private void connectToHotspot(){
-        if (wifiManager.isWifiEnabled()){
-            WifiInfo info = wifiManager.getConnectionInfo();
-            if (wifiManager.pingSupplicant()){
-                wifiManager.disconnect();
-                wifiManager.disableNetwork(info.getNetworkId());
-            }
-        } else
-            wifiManager.setWifiEnabled(true);
-        WifiConfiguration wc = new WifiConfiguration();
-        wc.SSID = "\"" + hostSSID + "\"";
-        wc.preSharedKey = "\"" + hostPassword + "\"";
-        wc.allowedKeyManagement.set(WifiConfiguration.KeyMgmt.WPA_PSK);
+        if (!hostSSID.equals("dummy")){
+            WifiConfiguration wc = new WifiConfiguration();
+            wc.SSID = "\"" + hostSSID + "\"";
+            wc.preSharedKey = "\"" + hostPassword + "\"";
+            wc.allowedKeyManagement.set(WifiConfiguration.KeyMgmt.WPA_PSK);
 
-        int res = wifiManager.addNetwork(wc);
-        boolean b = wifiManager.enableNetwork(res,true);
+            int res = wifiManager.addNetwork(wc);
+            boolean b = wifiManager.enableNetwork(res,true);
+            if (b){
+                Toast.makeText(this,"Connected to Host",Toast.LENGTH_SHORT).show();
+                Log.e("MainActivity","Connected");
+                btnWifi.setImageDrawable(getResources().getDrawable(R.drawable.ic_baseline_wifi_off_24));
+            }
+            else{
+                Toast.makeText(this,"Not Connected",Toast.LENGTH_SHORT).show();
+                Log.e("MainActivity","Not Connected");
+                btnWifi.setImageDrawable(getResources().getDrawable(R.drawable.ic_wifi_black_24dp));
+            }
+        } else {
+            Toast.makeText(this,"Create Host first",Toast.LENGTH_SHORT).show();
+            btnWifi.setImageDrawable(getResources().getDrawable(R.drawable.ic_wifi_black_24dp));
+        }
     }
 
     @Override
@@ -189,38 +258,17 @@ public class MainActivity extends WearableActivity implements SensorEventListene
 
     }
 
-    @Override
-    public void onDataChanged(@NonNull DataEventBuffer dataEventBuffer) {
-        for (DataEvent dataEvent : dataEventBuffer){
-            if (dataEvent.getType() == DataEvent.TYPE_CHANGED &&
-                    dataEvent.getDataItem().getUri().getPath().equals("/connection")) {
-                DataMapItem dataMapItem = DataMapItem.fromDataItem(dataEvent.getDataItem());
-                Asset asset = dataMapItem.getDataMap().getAsset("info");
-                try {
-                    InputStream assetInputStream =
-                            Tasks.await(Wearable.getDataClient(getApplicationContext()).getFdForAsset(asset))
-                                    .getInputStream();
-                    if (assetInputStream != null) {
-                        String info = IOUtils.toString(assetInputStream, StandardCharsets.UTF_8);
-                        getInfoFromString(info);
-                    }
-                } catch (ExecutionException e) {
-                    e.printStackTrace();
-                } catch (InterruptedException e) {
-                    e.printStackTrace();
-                } catch (IOException e) {
-                    e.printStackTrace();
-                }
-                // Do something with the bitmap
-            }
-        }
-    }
-
     private void getInfoFromString(String info) {
+        Log.e("MainActivity", "Info Received " + info);
         String[] values = info.split("::");
-        hostSSID = values[0];
-        hostPassword = values[1];
-        hostIp = values[2];
+        if (values.length == 2)
+            Toast.makeText(MainActivity.this,values[0],Toast.LENGTH_LONG).show();
+        else {
+            Toast.makeText(MainActivity.this,"Credentials received",Toast.LENGTH_SHORT).show();
+            hostSSID = values[0];
+            hostPassword = values[1];
+            hostIp = values[2];
+        }
     }
 
     @Override
@@ -228,6 +276,7 @@ public class MainActivity extends WearableActivity implements SensorEventListene
         super.onDestroy();
         senSensorManager.unregisterListener(MainActivity.this,senAccelerometer);
         senSensorManager.unregisterListener(MainActivity.this,senGyroscope);
+        LocalBroadcastManager.getInstance(this).unregisterReceiver(mMessageReciever);
     }
 
     public boolean hasPermissions(Context context, String... permissions){

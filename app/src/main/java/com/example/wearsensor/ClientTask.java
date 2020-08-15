@@ -1,7 +1,11 @@
 package com.example.wearsensor;
 
+import android.content.Context;
 import android.os.Environment;
+import android.os.Handler;
+import android.os.Looper;
 import android.util.Log;
+import android.widget.Toast;
 
 import org.apache.commons.io.FileUtils;
 
@@ -11,19 +15,22 @@ import java.io.DataOutputStream;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
+import java.io.ObjectInputStream;
 import java.net.DatagramPacket;
 import java.net.Socket;
 
 public class ClientTask implements Runnable {
+    private Context context;
     private String IP;
     private int PORT;
     private Socket socket;
     private DatagramPacket info;
     byte[] b = null;
 
-    public ClientTask(String IP, int PORT) {
+    public ClientTask(String IP, int PORT, Context context) {
         this.IP = IP;
         this.PORT = PORT;
+        this.context = context;
     }
 
     @Override
@@ -51,11 +58,10 @@ public class ClientTask implements Runnable {
 
                 int theByte = 0;
                 while((theByte = bis.read()) != -1) bos.write(theByte);
-
-                FileUtils.forceDelete(file);
+                bos.flush();
                 bis.close();
+                FileUtils.forceDelete(file);
             }
-
             dos.close();
         } catch (IOException e) {
             e.printStackTrace();
@@ -69,4 +75,5 @@ public class ClientTask implements Runnable {
             }
         }
     }
+
 }
